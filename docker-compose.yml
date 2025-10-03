@@ -1,0 +1,18 @@
+services:
+  news-analyzer:
+    build: .
+    container_name: bradesco-news-analyzer
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+    volumes:
+      - ./dados:/app/dados
+      - ./config:/app/config
+      - ./logs:/app/logs
+      - ./downloads:/app/downloads
+    restart: "no"
+    networks:
+      - news-net
+
+networks:
+  news-net:
+    driver: bridge
