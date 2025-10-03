@@ -1,0 +1,19 @@
+# Ignora todos os arquivos Excel
+*.xlsx
+
+# Ignora o arquivo de variáveis de ambiente
+.env
+
+# Ignora todos os arquivos de log
+*.log
+
+# Ignora a pasta 'logs' inteira (se houver, e para garantir)
+logs/
+
+# Adicione outras pastas ou arquivos temporários que você não queira versionar
+# Exemplo:
+# __pycache__/
+.pytest_cache/
+# venv/
+.DS_Store
+*.pyc
