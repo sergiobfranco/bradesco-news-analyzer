@@ -1,7 +1,7 @@
 """
 Módulo responsável pela análise de protagonismo usando DeepSeek API
 Adaptado do código original removendo filtros específicos do iFood
-VERSÃO ATUALIZADA: Inclui contagem de ocorrências das marcas
+VERSÃO ATUALIZADA: Inclui contagem de ocorrências das marcas e verificação de porta-vozes
 """
 
 import pandas as pd
@@ -9,8 +9,10 @@ import requests
 import time
 import re
 import logging
+import unicodedata
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Optional
+from pathlib import Path
 from src.config_manager import ConfigManager
 
 class ProtagonismoAnalyzer:
@@ -18,6 +20,91 @@ class ProtagonismoAnalyzer:
         self.config = config_manager
         self.logger = logging.getLogger(__name__)
         self.headers = config_manager.get_api_headers()
+        self.porta_vozes_bradesco = self._load_porta_vozes()
+    
+    def _normalize_text(self, text: str) -> str:
+        """
+        Remove acentos e normaliza texto para comparação
+        
+        Args:
+            text: Texto a ser normalizado
+            
+        Returns:
+            Texto sem acentos e em minúsculas
+        """
+        # Remove acentos usando NFD (Normalization Form Canonical Decomposition)
+        nfd = unicodedata.normalize('NFD', text)
+        text_sem_acento = ''.join(char for char in nfd if unicodedata.category(char) != 'Mn')
+        return text_sem_acento.lower()
+    
+    def _load_porta_vozes(self) -> List[str]:
+        """
+        Carrega lista de porta-vozes do Bradesco do arquivo mais recente
+        
+        Returns:
+            Lista de nomes de porta-vozes normalizados (sem acentos)
+        """
+        try:
+            config_path = Path("config")
+            
+            # Busca todos os arquivos que começam com porta_vozes_
+            arquivos_porta_vozes = list(config_path.glob("porta_vozes_*.xlsx"))
+            
+            if not arquivos_porta_vozes:
+                self.logger.warning("Nenhum arquivo de porta-vozes encontrado na pasta config")
+                return []
+            
+            # Ordena por nome (timestamp no nome) e pega o mais recente
+            arquivo_mais_recente = sorted(arquivos_porta_vozes, reverse=True)[0]
+            
+            self.logger.info(f"Carregando porta-vozes do arquivo: {arquivo_mais_recente.name}")
+            
+            # Lê arquivo sem header (apenas uma coluna)
+            df_porta_vozes = pd.read_excel(arquivo_mais_recente, header=None)
+            
+            # Extrai nomes e normaliza (remove acentos)
+            porta_vozes = []
+            for nome in df_porta_vozes[0].dropna():
+                nome_normalizado = self._normalize_text(str(nome).strip())
+                if nome_normalizado:
+                    porta_vozes.append(nome_normalizado)
+            
+            self.logger.info(f"Carregados {len(porta_vozes)} porta-vozes do Bradesco")
+            self.logger.debug(f"Porta-vozes carregados: {porta_vozes[:5]}...")  # Mostra primeiros 5
+            
+            return porta_vozes
+            
+        except Exception as e:
+            self.logger.error(f"Erro ao carregar arquivo de porta-vozes: {str(e)}")
+            return []
+    
+    def _check_porta_voz_mentioned(self, titulo: str, conteudo: str) -> Optional[str]:
+        """
+        Verifica se algum porta-voz do Bradesco é mencionado no texto
+        
+        Args:
+            titulo: Título da notícia
+            conteudo: Conteúdo da notícia
+            
+        Returns:
+            Nome do porta-voz encontrado ou None
+        """
+        if not self.porta_vozes_bradesco:
+            return None
+        
+        # Combina título e conteúdo e normaliza
+        texto_completo = f"{titulo} {conteudo}"
+        texto_normalizado = self._normalize_text(texto_completo)
+        
+        # Busca cada porta-voz no texto
+        for porta_voz in self.porta_vozes_bradesco:
+            # Usa word boundary para evitar matches parciais
+            pattern = r'\b' + re.escape(porta_voz) + r'\b'
+            if re.search(pattern, texto_normalizado):
+                # Retorna o nome original (antes da normalização) para log
+                return porta_voz
+        
+        return None
     
     def analyze_protagonismo(self, final_df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -135,6 +222,7 @@ class ProtagonismoAnalyzer:
         noticias_filtradas = 0
         classificacoes_automaticas = 0
         chamadas_deepseek = 0
+        upgrades_por_porta_voz = 0  # NOVO: Contador de upgrades por porta-voz
         
         for index, row in final_df.iterrows():
             noticia_id = row['Id']
@@ -168,12 +256,54 @@ class ProtagonismoAnalyzer:
             for marca in marcas_no_canal:
                 self.logger.info(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Avaliando notícia ID {noticia_id} para a marca: {marca}")
                 
-                # Verifica se a marca aparece no título
-                if re.search(r'\b' + re.escape(marca.lower()) + r'\b', titulo_noticia.lower()):
-                    self.logger.info(f"Marca '{marca}' encontrada no título - Classificação automática: Dedicada")
+                # === NOVO: PRÉ-PROCESSAMENTO BASEADO EM CONTAGEM DE OCORRÊNCIAS ===
+                contagem_ocorrencias = self._count_marca_occurrences(marca, titulo_noticia, conteudo_noticia)
+                nivel_detectado = None
+                classificacao_automatica = False
+                
+                # Regra 1: 5+ ocorrências = Dedicada
+                if contagem_ocorrencias >= 5:
                     nivel_detectado = 'Nível 1'  # Dedicada
+                    classificacao_automatica = True
+                    self.logger.info(f"Marca '{marca}' com {contagem_ocorrencias} ocorrências - Classificação automática: Dedicada")
                     classificacoes_automaticas += 1
-                else:
+                
+                # Regra 2: 3-4 ocorrências = Conteúdo
+                elif contagem_ocorrencias >= 3:
+                    nivel_detectado = 'Nível 2'  # Conteúdo
+                    classificacao_automatica = True
+                    self.logger.info(f"Marca '{marca}' com {contagem_ocorrencias} ocorrências - Classificação automática: Conteúdo")
+                    classificacoes_automaticas += 1
+                
+                # Regra 3: 1-2 ocorrências = Citação (mas verifica porta-voz para Bradesco)
+                elif contagem_ocorrencias >= 1:
+                    nivel_detectado = 'Nível 3'  # Citação
+                    classificacao_automatica = True
+                    
+                    # NOVO: Verificação especial para Bradesco - busca porta-vozes
+                    if marca == 'Bradesco':
+                        porta_voz_encontrado = self._check_porta_voz_mentioned(titulo_noticia, conteudo_noticia)
+                        
+                        if porta_voz_encontrado:
+                            nivel_detectado = 'Nível 2'  # Upgrade para Conteúdo
+                            self.logger.info(f"Marca '{marca}' com {contagem_ocorrencias} ocorrências + porta-voz '{porta_voz_encontrado}' encontrado - Upgrade de Citação para Conteúdo")
+                        else:
+                            self.logger.info(f"Marca '{marca}' com {contagem_ocorrencias} ocorrências - Classificação automática: Citação")
+                    else:
+                        self.logger.info(f"Marca '{marca}' com {contagem_ocorrencias} ocorrências - Classificação automática: Citação")
+                    
+                    classificacoes_automaticas += 1
+                
+                # Regra 4: Marca no título sempre sobrescreve (mantém lógica original)
+                if re.search(r'\b' + re.escape(marca.lower()) + r'\b', titulo_noticia.lower()):
+                    nivel_detectado = 'Nível 1'  # Dedicada
+                    classificacao_automatica = True
+                    self.logger.info(f"Marca '{marca}' encontrada no título - Classificação automática: Dedicada (sobrescreve contagem)")
+                    if contagem_ocorrencias < 5:  # Só conta se não foi contado antes
+                        classificacoes_automaticas += 1
+                
+                # Se não houve classificação automática, envia para DeepSeek
+                if not classificacao_automatica:
                     # Verifica regras específicas de conteúdo
                     content_check = self.config.check_specific_content_requirements(canais_noticia, texto_completo_noticia)
                     
@@ -190,23 +320,17 @@ class ProtagonismoAnalyzer:
                     # Pausa para evitar sobrecarregar a API
                     time.sleep(1)
                 
-                # === NOVO: PÓS-PROCESSAMENTO PARA CONTAGEM DE OCORRÊNCIAS ===
-                contagem_ocorrencias = 0
-                if nivel_detectado not in ['Nenhum Nível Encontrado', 'Erro na API', 'Erro de Processamento']:
-                    # Só conta ocorrências se houve classificação válida de protagonismo
-                    contagem_ocorrencias = self._count_marca_occurrences(marca, titulo_noticia, conteudo_noticia)
-                    self.logger.info(f"Marca {marca} - Contagem de ocorrências: {contagem_ocorrencias}")
-                
                 # Atualizar DataFrame resultado no formato largo
                 mask = resultado_df['Id'] == noticia_id
                 resultado_df.loc[mask, f'Nivel de Protagonismo {marca}'] = nivel_detectado
                 
-                # NOVO: Só preenche a contagem se houve classificação válida
+                # Preenche a contagem (mesmo para classificação automática)
                 if nivel_detectado not in ['Nenhum Nível Encontrado', 'Erro na API', 'Erro de Processamento']:
                     resultado_df.loc[mask, f'Ocorrencias {marca}'] = contagem_ocorrencias
                 
                 self.logger.info(f"Notícia ID {noticia_id}, Marca {marca}: "
-                               f"Nível='{nivel_detectado}', Ocorrências={contagem_ocorrencias if contagem_ocorrencias > 0 else 'N/A'}")
+                               f"Nível='{nivel_detectado}', Ocorrências={contagem_ocorrencias}, "
+                               f"Classificação={'Automática' if classificacao_automatica else 'DeepSeek'}")
         
         # Log de estatísticas finais
         self.logger.info(f"Estatísticas do processamento:")
