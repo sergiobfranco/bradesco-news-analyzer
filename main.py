@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 import logging
 from datetime import datetime
+import pandas as pd
 
 # Adicionar o diretório atual ao path para importações
 sys.path.append(str(Path(__file__).parent))
@@ -50,6 +51,8 @@ def main():
         logger.info("Iniciando chamada da API...")
         api_caller = APICaller(config_manager)
         final_df = api_caller.fetch_data()
+        # CARREGAMENTO TEMPORÁRIO: Substituir fetch_data pelo arquivo local
+        #final_df = pd.read_excel('dados/api/Favoritos_Marcas.xlsx')
         
         if final_df.empty:
             logger.error("Nenhum dado foi retornado pela API")

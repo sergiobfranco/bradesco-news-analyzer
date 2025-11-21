@@ -6,7 +6,9 @@ Permite manutenção centralizada dos mapeamentos sem alterar código
 # Mapeamento de termos nos canais para marcas específicas
 CHANNEL_BRAND_MAPPING = {
     "Bradesco": [
+        "Asset",
         "Atacado / Banco de Investimento", 
+        "Corretora/Ágora",
         "Economia",
         "ESG",
         "Inovação/TI",
@@ -21,17 +23,6 @@ CHANNEL_BRAND_MAPPING = {
     "Santander": [
         "Santander",
         # Futuramente podem ser adicionados outros termos para Santander
-    ],
-    "Ágora": [
-        "Corretora/Ágora",
-        "Ágora"
-    ],
-    "Bradesco Asset": [
-        "Asset",
-        "Bradesco Asset"
-    ],
-    "BBI": [
-        "BBI"
     ]
 }
 
@@ -39,9 +30,7 @@ CHANNEL_BRAND_MAPPING = {
 # Estrutura: canal -> termo_a_buscar_no_conteudo
 SPECIFIC_CONTENT_VERIFICATION = {
     "Asset": "Bradesco Asset",
-    "Corretora/Ágora": "Ágora",
-    "Ágora": "Ágora",
-    "BBI": "BBI"
+    "Corretora/Ágora": "Ágora"
 }
 
 def get_brand_terms(brand_name: str) -> list:
@@ -111,7 +100,6 @@ def check_specific_content_requirements(channel_content: str, news_content: str)
 def normalize_channel_field(channel_content: str) -> str:
     """
     Normaliza o campo Canais substituindo termos específicos pelas marcas correspondentes
-    ATUALIZADO: Mantém 'Ágora', 'Bradesco Asset' e 'BBI' como marcas independentes
     
     Args:
         channel_content: Conteúdo original do campo Canais
@@ -124,29 +112,8 @@ def normalize_channel_field(channel_content: str) -> str:
     # Copia o conteúdo original
     normalized_content = str(channel_content)
     
-    # IMPORTANTE: Processa marcas independentes PRIMEIRO para evitar substituições incorretas
-    
-    # 1. Substitui 'Corretora/Ágora' por 'Ágora'
-    if re.search(r'\b' + re.escape('Corretora/Ágora') + r'\b', normalized_content, re.IGNORECASE):
-        pattern = r'\b' + re.escape('Corretora/Ágora') + r'\b'
-        normalized_content = re.sub(pattern, 'Ágora', normalized_content, flags=re.IGNORECASE)
-    
-    # 2. Substitui 'Asset' por 'Bradesco Asset' (se não for precedido por 'Bradesco')
-    # Verifica se já existe 'Bradesco Asset' no texto
-    if not re.search(r'\bBradesco\s+Asset\b', normalized_content, re.IGNORECASE):
-        # Substitui 'Asset' standalone por 'Bradesco Asset'
-        pattern = r'(?<!Bradesco\s)\bAsset\b(?!\s+Bradesco)'
-        normalized_content = re.sub(pattern, 'Bradesco Asset', normalized_content, flags=re.IGNORECASE)
-    
-    # 3. BBI já é uma marca independente, não precisa de tratamento especial
-    
-    # Processa as outras marcas (Bradesco, Itaú, Santander)
-    # Exclui as marcas independentes já processadas
-    marcas_para_normalizar = {k: v for k, v in CHANNEL_BRAND_MAPPING.items() 
-                              if k not in ['Ágora', 'Bradesco Asset', 'BBI']}
-    
     # Para cada marca, verifica se algum dos seus termos está presente
-    for brand_name, brand_terms in marcas_para_normalizar.items():
+    for brand_name, brand_terms in CHANNEL_BRAND_MAPPING.items():
         found_terms = []
         
         # Verifica quais termos desta marca estão presentes

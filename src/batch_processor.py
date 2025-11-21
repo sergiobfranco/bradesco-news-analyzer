@@ -1,6 +1,6 @@
 """
 Módulo responsável pelo processamento em lote dos dados consolidados
-VERSÃO ATUALIZADA: Compatível com formato largo incluindo colunas de ocorrências
+VERSÃO 2: Compatível com formato largo incluindo colunas de ocorrências e porta-vozes
 """
 
 import pandas as pd
@@ -17,7 +17,7 @@ class BatchProcessor:
     def process_batch(self, final_df_consolidado: pd.DataFrame, final_df: pd.DataFrame):
         """
         Processa os dados consolidados em lote
-        ATUALIZADO: Funciona com formato largo incluindo colunas de ocorrências
+        VERSÃO 2: Funciona com formato largo incluindo colunas de ocorrências e porta-vozes
         """
         try:
             self.logger.info("Iniciando processamento em lote...")
@@ -79,15 +79,17 @@ class BatchProcessor:
     def _process_group_consolidation_largo(self, df_lote: pd.DataFrame) -> pd.DataFrame:
         """
         Processa consolidação por grupos no formato largo
-        ATUALIZADO: Trabalha com colunas de protagonismo e ocorrências por marca
+        VERSÃO 2: Trabalha com colunas de protagonismo, porta-vozes e ocorrências por marca
         """
         self.logger.info("Processando consolidação em formato largo...")
         
-        # Identifica colunas de protagonismo e ocorrências
+        # Identifica colunas de protagonismo, porta-vozes e ocorrências
         colunas_protagonismo = [col for col in df_lote.columns if col.startswith('Nivel de Protagonismo')]
+        colunas_portavoz = [col for col in df_lote.columns if col.startswith('Porta-Voz')]
         colunas_ocorrencias = [col for col in df_lote.columns if col.startswith('Ocorrencias')]
         
         self.logger.info(f"Colunas de protagonismo encontradas: {colunas_protagonismo}")
+        self.logger.info(f"Colunas de porta-vozes encontradas: {colunas_portavoz}")
         self.logger.info(f"Colunas de ocorrências encontradas: {colunas_ocorrencias}")
         
         if not colunas_protagonismo:
@@ -115,19 +117,21 @@ class BatchProcessor:
         self.logger.info(f"Registros válidos após consolidação: {len(df_lote_final)} de {len(df_lote)}")
         
         # Log das estatísticas por marca
-        self._log_batch_statistics_largo(df_lote_final, colunas_protagonismo, colunas_ocorrencias)
+        self._log_batch_statistics_largo(df_lote_final, colunas_protagonismo, colunas_portavoz, colunas_ocorrencias)
         
         return df_lote_final
     
-    def _log_batch_statistics_largo(self, df_lote: pd.DataFrame, colunas_protagonismo: List[str], colunas_ocorrencias: List[str]):
+    def _log_batch_statistics_largo(self, df_lote: pd.DataFrame, colunas_protagonismo: List[str], colunas_portavoz: List[str], colunas_ocorrencias: List[str]):
         """
         Registra estatísticas do processamento em lote para formato largo
+        VERSÃO 2: Inclui estatísticas de porta-vozes
         """
         self.logger.info("=== ESTATÍSTICAS DO BATCH PROCESSING ===")
         
         for col_protagonismo in colunas_protagonismo:
             # Extrai nome da marca da coluna
             marca = col_protagonismo.replace('Nivel de Protagonismo ', '')
+            col_portavoz = f'Porta-Voz {marca}'
             col_ocorrencias = f'Ocorrencias {marca}'
             
             # Conta classificações válidas
@@ -146,6 +150,14 @@ class BatchProcessor:
                 for nivel, quantidade in contagem_niveis.items():
                     self.logger.info(f"  - {nivel}: {quantidade} notícias")
                 
+                # NOVO: Estatísticas de porta-vozes se a coluna existir
+                if col_portavoz in df_lote.columns:
+                    portavozes_validos = df_lote[col_portavoz].dropna()
+                    if len(portavozes_validos) > 0:
+                        self.logger.info(f"  - Notícias com porta-voz identificado: {len(portavozes_validos)}")
+                    else:
+                        self.logger.info(f"  - Nenhum porta-voz identificado")
+                
                 # Estatísticas de ocorrências se a coluna existir
                 if col_ocorrencias in df_lote.columns:
                     ocorrencias_validas = df_lote[col_ocorrencias].dropna()
@@ -160,7 +172,7 @@ class BatchProcessor:
     def _create_final_clean_file_largo(self, df_lote_final: pd.DataFrame, final_df: pd.DataFrame) -> Optional[str]:
         """
         Cria o arquivo final limpo para formato largo
-        ATUALIZADO: Trabalha com colunas de protagonismo e ocorrências
+        VERSÃO 2: Trabalha com colunas de protagonismo, porta-vozes e ocorrências
         """
         try:
             # Identifica todas as colunas disponíveis
@@ -182,6 +194,11 @@ class BatchProcessor:
                 marca = col_protagonismo.replace('Nivel de Protagonismo ', '')
                 if marca not in marcas_processadas:
                     colunas_finais.append(col_protagonismo)
+                    
+                    # NOVO: Adiciona coluna de porta-voz correspondente se existir
+                    col_portavoz = f'Porta-Voz {marca}'
+                    if col_portavoz in df_lote_final.columns:
+                        colunas_finais.append(col_portavoz)
                     
                     # Adiciona coluna de ocorrências correspondente se existir
                     col_ocorrencias = f'Ocorrencias {marca}'
@@ -219,12 +236,19 @@ class BatchProcessor:
                         if col in df_lote_final.columns:
                             colunas_finais.append(col)
                     
-                    # Re-adiciona colunas de protagonismo e ocorrências
+                    # Re-adiciona colunas de protagonismo, porta-vozes e ocorrências
                     for col_protagonismo in colunas_protagonismo:
                         if col_protagonismo in df_lote_final.columns:
                             colunas_finais.append(col_protagonismo)
                             
                             marca = col_protagonismo.replace('Nivel de Protagonismo ', '')
+                            
+                            # NOVO: Adiciona porta-voz
+                            col_portavoz = f'Porta-Voz {marca}'
+                            if col_portavoz in df_lote_final.columns:
+                                colunas_finais.append(col_portavoz)
+                            
+                            # Adiciona ocorrências
                             col_ocorrencias = f'Ocorrencias {marca}'
                             if col_ocorrencias in df_lote_final.columns:
                                 colunas_finais.append(col_ocorrencias)

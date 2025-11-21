@@ -119,14 +119,13 @@ class DataConsolidator:
     def _log_consolidation_statistics_largo(self, df_resultados: pd.DataFrame, marcas: List[str]):
         """
         Registra estatísticas da consolidação para formato largo
-        ATUALIZADO: Inclui estatísticas das colunas de ocorrências e porta-vozes
+        NOVO: Inclui estatísticas das colunas de ocorrências
         """
         self.logger.info("=== ESTATÍSTICAS DA CONSOLIDAÇÃO ===")
         
         for marca in marcas:
             nivel_col = f'Nivel de Protagonismo {marca}'
             ocorrencias_col = f'Ocorrencias {marca}'
-            portavoz_col = f'Porta-Voz {marca}'
             
             if nivel_col in df_resultados.columns:
                 # Conta classificações por nível
@@ -155,14 +154,6 @@ class DataConsolidator:
                             self.logger.info(f"  - Média de ocorrências: {media_ocorrencias:.2f}")
                         else:
                             self.logger.info(f"  - Nenhuma ocorrência registrada")
-                    
-                    # NOVO: Estatísticas de porta-vozes se a coluna existir
-                    if portavoz_col in df_resultados.columns:
-                        portavozes_validos = df_resultados[portavoz_col].dropna()
-                        if len(portavozes_validos) > 0:
-                            self.logger.info(f"  - Notícias com porta-voz identificado: {len(portavozes_validos)}")
-                        else:
-                            self.logger.info(f"  - Nenhum porta-voz identificado")
                 else:
                     self.logger.info(f"{marca}: Nenhuma classificação válida")
     
@@ -292,21 +283,6 @@ class DataConsolidator:
                         self.logger.warning(f"  - {col}: Nenhum dado preenchido")
             else:
                 self.logger.warning("Nenhuma coluna de ocorrências encontrada no arquivo final")
-            
-            # NOVO: Log de verificação das colunas de porta-vozes
-            colunas_portavoz = [col for col in final_df_consolidado.columns if 'Porta-Voz' in col]
-            if colunas_portavoz:
-                self.logger.info(f"Colunas de porta-vozes salvas: {colunas_portavoz}")
-                
-                # Verifica se há dados nas colunas de porta-vozes
-                for col in colunas_portavoz:
-                    dados_nao_nulos = final_df_consolidado[col].notna().sum()
-                    if dados_nao_nulos > 0:
-                        self.logger.info(f"  - {col}: {dados_nao_nulos} registros preenchidos")
-                    else:
-                        self.logger.info(f"  - {col}: Nenhum porta-voz identificado")
-            else:
-                self.logger.warning("Nenhuma coluna de porta-vozes encontrada no arquivo final")
                 
         except Exception as e:
             self.logger.error(f"Erro ao salvar dados consolidados: {str(e)}")

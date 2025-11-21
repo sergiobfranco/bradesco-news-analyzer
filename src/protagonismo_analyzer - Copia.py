@@ -174,27 +174,11 @@ class ProtagonismoAnalyzer:
         marcas_compostas = []
         marca_base_lower = marca_base.lower()
         
-        # Primeiro: busca nas marcas configuradas
         for marca in todas_marcas:
             marca_lower = marca.lower()
             # Se a marca contém a base mas não é igual (é composta)
             if marca_base_lower in marca_lower and marca_lower != marca_base_lower:
                 marcas_compostas.append(marca)
-        
-        # Segundo: adiciona combinações conhecidas que podem não estar em w_marcas
-        combinacoes_conhecidas = {
-            'bradesco': ['Bradesco Asset', 'Bradesco BBI'],  # Bradesco exclui suas compostas
-            'itau': ['Itaú Unibanco'],  # Itaú exclui suas compostas
-            'santander': ['Santander Brasil'],  # Santander exclui suas compostas
-            'agora': [],  # Ágora não tem compostas conhecidas
-            # NOTA: BBI NÃO tem 'Bradesco BBI' como composta porque deve CONTAR, não excluir
-        }
-        
-        marca_normalizada = marca_base_lower.replace('ü', 'u').replace('á', 'a')
-        if marca_normalizada in combinacoes_conhecidas:
-            for marca_composta in combinacoes_conhecidas[marca_normalizada]:
-                if marca_composta not in marcas_compostas:
-                    marcas_compostas.append(marca_composta)
         
         return marcas_compostas
     
@@ -481,13 +465,6 @@ class ProtagonismoAnalyzer:
             noticias_processadas += 1
             self.logger.info(f"Processando notícia ID {noticia_id} - Marcas encontradas no canal: {marcas_no_canal}")
             
-            # ═══ NOVO: Detectar porta-vozes UMA VEZ por notícia ═══
-            porta_vozes_noticia = self._check_porta_voz_mentioned(titulo_noticia, conteudo_noticia)
-            marcas_com_porta_vozes = ['Bradesco', 'Ágora', 'Bradesco Asset', 'BBI']
-            
-            if porta_vozes_noticia:
-                self.logger.info(f"Porta-vozes detectados na notícia ID {noticia_id}: {', '.join(porta_vozes_noticia)}")
-            
             # Processa apenas as marcas encontradas no campo Canais
             for marca in marcas_no_canal:
                 self.logger.info(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - "
@@ -524,28 +501,30 @@ class ProtagonismoAnalyzer:
                     self.logger.info(f"Marca '{marca}' com {contagem} ocorrências - Classificação automática: Conteúdo")
                     classificacoes_automaticas += 1
                 
-                # Regra 3: 1-2 ocorrências = Citação (verifica porta-voz para upgrade)
+                # Regra 3: 1-2 ocorrências = Citação (mas verifica porta-voz para marcas específicas)
                 elif contagem >= 1:
                     nivel_detectado = 'Nível 3'  # Citação
                     classificacao_automatica = True
-                    self.logger.info(f"Marca '{marca}' com {contagem} ocorrências - Classificação automática: Citação")
-                    classificacoes_automaticas += 1
-                
-                # NOVA LÓGICA: Verificação de porta-vozes para TODAS as marcas com classificação automática
-                if classificacao_automatica and marca in marcas_com_porta_vozes and porta_vozes_noticia:
-                    # Aplica porta-vozes independentemente do nível de classificação
-                    mask = resultado_df['Id'] == noticia_id
-                    porta_vozes_str = ', '.join(porta_vozes_noticia)
-                    resultado_df.loc[mask, f'Porta-Voz {marca}'] = porta_vozes_str
                     
-                    # Se era Citação (1-2 ocorrências), faz upgrade para Conteúdo
-                    if contagem >= 1 and contagem <= 2:
-                        nivel_detectado = 'Nível 2'  # Upgrade para Conteúdo
-                        upgrades_por_porta_voz += 1
-                        self.logger.info(f"Marca '{marca}' com {contagem} ocorrências + porta-vozes: {', '.join(porta_vozes_noticia)} - Upgrade para Conteúdo")
+                    # Verificação de porta-vozes para Bradesco, Ágora, Bradesco Asset e BBI
+                    if marca in ['Bradesco', 'Ágora', 'Bradesco Asset', 'BBI']:
+                        porta_vozes_encontrados = self._check_porta_voz_mentioned(titulo_noticia, conteudo_noticia)
+                        
+                        if porta_vozes_encontrados:
+                            nivel_detectado = 'Nível 2'  # Upgrade para Conteúdo
+                            upgrades_por_porta_voz += 1
+                            self.logger.info(f"Marca '{marca}' com {contagem} ocorrências + porta-vozes: {', '.join(porta_vozes_encontrados)} - Upgrade para Conteúdo")
+                            
+                            # Salvar porta-vozes no DataFrame (igual ao que já existe no método DeepSeek)
+                            mask = resultado_df['Id'] == noticia_id
+                            porta_vozes_str = ', '.join(porta_vozes_encontrados)
+                            resultado_df.loc[mask, f'Porta-Voz {marca}'] = porta_vozes_str
+                        else:
+                            self.logger.info(f"Marca '{marca}' com {contagem} ocorrências - Classificação automática: Citação")
                     else:
-                        # Para 3+ ocorrências, mantém o nível mas aplica porta-vozes
-                        self.logger.info(f"Marca '{marca}' com {contagem} ocorrências + porta-vozes: {', '.join(porta_vozes_noticia)} - Mantém {nivel_detectado}")
+                        self.logger.info(f"Marca '{marca}' com {contagem} ocorrências - Classificação automática: Citação")
+                    
+                    classificacoes_automaticas += 1
                 
                 # ═══ CORREÇÃO 2: Verificar se marca aparece ISOLADA no título (sobrescreve contagem) ═══
                 marca_isolada_no_titulo = self._verificar_marca_isolada_no_titulo(
@@ -577,7 +556,7 @@ class ProtagonismoAnalyzer:
                     # Faz análise completa com DeepSeek
                     nivel_detectado = self._analyze_single_news_marca(
                         texto_completo_noticia, marca, df_protagonismo, noticia_id, 
-                        canais_noticia, content_check, porta_vozes_noticia
+                        canais_noticia, content_check
                     )
                     chamadas_deepseek += 1
                     # Pausa para evitar sobrecarregar a API
@@ -610,8 +589,7 @@ class ProtagonismoAnalyzer:
     
     def _analyze_single_news_marca(self, texto_noticia: str, marca: str, 
                                   df_protagonismo: pd.DataFrame, noticia_id: int,
-                                  canais_noticia: str = "", content_check: dict = None,
-                                  porta_vozes_global: List[str] = None) -> str:
+                                  canais_noticia: str = "", content_check: dict = None) -> str:
         """
         Analisa uma única notícia para uma marca específica
         """
@@ -719,9 +697,6 @@ class ProtagonismoAnalyzer:
             conteudo = str(row.get('Conteudo', '')).strip()
             noticias_dict[noticia_id] = {'titulo': titulo, 'conteudo': conteudo}
         
-        # Cache de porta-vozes por notícia (detecta uma vez por notícia)
-        porta_vozes_por_noticia = {}
-        
         # Processa cada linha do DataFrame resultado
         for index, row in df_resultados.iterrows():
             noticia_id = row['Id']
@@ -729,10 +704,6 @@ class ProtagonismoAnalyzer:
             if noticia_id in noticias_dict:
                 titulo = noticias_dict[noticia_id]['titulo']
                 conteudo = noticias_dict[noticia_id]['conteudo']
-                
-                # Detecta porta-vozes UMA VEZ por notícia
-                if noticia_id not in porta_vozes_por_noticia:
-                    porta_vozes_por_noticia[noticia_id] = self._check_porta_voz_mentioned(titulo, conteudo)
                 
                 for marca in self.config.w_marcas:
                     nivel_col = f'Nivel de Protagonismo {marca}'
@@ -759,25 +730,20 @@ class ProtagonismoAnalyzer:
                             else:  # 1-2 ocorrências
                                 nivel_corrigido = 'Nível 3'  # Citação
                                 nome_nivel = 'Citação'
-                            
-                            # NOVA LÓGICA: Aplicar porta-vozes SEMPRE que houver (independente da contagem)
-                            if marca in ['Bradesco', 'Ágora', 'Bradesco Asset', 'BBI']:
-                                porta_vozes_noticia = porta_vozes_por_noticia.get(noticia_id, [])
                                 
-                                if porta_vozes_noticia:
-                                    # Preenche coluna de porta-voz
-                                    portavoz_col = f'Porta-Voz {marca}'
-                                    if portavoz_col in df_resultados.columns:
-                                        porta_vozes_str = ', '.join(porta_vozes_noticia)
-                                        df_resultados.loc[index, portavoz_col] = porta_vozes_str
+                                # NOVO: Verificar porta-vozes para upgrade (Bradesco, Ágora, Bradesco Asset, BBI)
+                                if marca in ['Bradesco', 'Ágora', 'Bradesco Asset', 'BBI']:
+                                    porta_vozes_encontrados = self._check_porta_voz_mentioned(titulo, conteudo)
                                     
-                                    # Só faz upgrade para Conteúdo se era Citação (1-2 ocorrências)
-                                    if contagem >= 1 and contagem <= 2:
+                                    if porta_vozes_encontrados:
                                         nivel_corrigido = 'Nível 2'  # Upgrade para Conteúdo
-                                        nome_nivel = f'Conteúdo (upgrade por porta-voz: {", ".join(porta_vozes_noticia)})'
-                                    else:
-                                        # Para 3+ ocorrências, mantém nível original mas adiciona porta-vozes
-                                        nome_nivel = f'{nome_nivel} (com porta-voz: {", ".join(porta_vozes_noticia)})'
+                                        nome_nivel = f'Conteúdo (upgrade por porta-voz: {", ".join(porta_vozes_encontrados)})'
+                                        
+                                        # Preenche coluna de porta-voz se existir
+                                        portavoz_col = f'Porta-Voz {marca}'
+                                        if portavoz_col in df_resultados.columns:
+                                            porta_vozes_str = ', '.join(porta_vozes_encontrados)
+                                            df_resultados.loc[index, portavoz_col] = porta_vozes_str
                             
                             # ═══ CORREÇÃO: Verificar se marca está ISOLADA no título ═══
                             marca_isolada = self._verificar_marca_isolada_no_titulo(marca, titulo, marcas_compostas)

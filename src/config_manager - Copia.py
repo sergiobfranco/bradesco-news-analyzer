@@ -54,8 +54,7 @@ class ConfigManager:
     def _setup_variables(self):
         """Define variáveis globais do sistema"""
         # Marcas a serem analisadas
-        # ATUALIZADO: Adicionadas 'Bradesco Asset' e 'BBI'
-        self.w_marcas = ['Bradesco', 'Itaú', 'Santander', 'Ágora', 'Bradesco Asset', 'BBI']
+        self.w_marcas = ['Bradesco', 'Itaú', 'Santander']
         
         # Configurações da API DeepSeek
         self.api_url = "https://api.deepseek.com/v1/chat/completions"
@@ -65,20 +64,14 @@ class ConfigManager:
             'Id',
             'Bradesco_nivel_protagonismo',
             'Itaú_nivel_protagonismo',
-            'Santander_nivel_protagonismo',
-            'Ágora_nivel_protagonismo',
-            'Bradesco Asset_nivel_protagonismo',
-            'BBI_nivel_protagonismo'
+            'Santander_nivel_protagonismo'
         ]
         
         # Mapeamento para renomear colunas
         self.renomear_colunas = {
             'Bradesco_nivel_protagonismo': 'Nivel de Protagonismo Bradesco',
             'Itaú_nivel_protagonismo': 'Nivel de Protagonismo Itaú',
-            'Santander_nivel_protagonismo': 'Nivel de Protagonismo Santander',
-            'Ágora_nivel_protagonismo': 'Nivel de Protagonismo Ágora',
-            'Bradesco Asset_nivel_protagonismo': 'Nivel de Protagonismo Bradesco Asset',
-            'BBI_nivel_protagonismo': 'Nivel de Protagonismo BBI'
+            'Santander_nivel_protagonismo': 'Nivel de Protagonismo Santander'
         }
     
     def _load_api_key(self):
