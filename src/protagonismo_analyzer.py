@@ -198,6 +198,40 @@ class ProtagonismoAnalyzer:
         
         return marcas_compostas
     
+    def _check_marca_eh_capa(self, marca: str, paginas_str: str, titulo: str, conteudo: str, marcas_compostas: List[str]) -> bool:
+        """
+        Verifica se uma marca está em notícia de capa E se a marca está presente no texto
+        
+        Args:
+            marca: Nome da marca (ex: "Bradesco")
+            paginas_str: Conteúdo do campo Paginas da notícia
+            titulo: Título da notícia
+            conteudo: Conteúdo da notícia
+            marcas_compostas: Lista de marcas compostas para contagem correta
+        
+        Returns:
+            bool: True se a notícia é de capa (_01_001) E a marca está presente no texto
+        """
+        if pd.isna(paginas_str) or not paginas_str:
+            return False
+            
+        # Converte para string se necessário
+        paginas = str(paginas_str).strip()
+        
+        # Primeiro verifica se contém _01_001 (indicador de capa)
+        if '_01_001' not in paginas:
+            return False
+            
+        # Segundo verifica se a marca está presente na notícia
+        contagem_marca = self._count_marca_occurrences_fixed(marca, titulo, conteudo, marcas_compostas)
+        
+        if contagem_marca > 0:
+            self.logger.info(f"Marca '{marca}' detectada na CAPA da publicação (páginas: {paginas}) com {contagem_marca} ocorrências")
+            return True
+        else:
+            self.logger.debug(f"Notícia é CAPA (páginas: {paginas}) mas marca '{marca}' não está presente no texto")
+            return False
+    
     def _verificar_marca_isolada_no_titulo(self, marca: str, titulo: str, 
                                            marcas_compostas: List[str]) -> bool:
         """
@@ -497,39 +531,49 @@ class ProtagonismoAnalyzer:
                 nivel_detectado = None
                 classificacao_automatica = False
                 
-                # ═══ CORREÇÃO 1: Obter marcas compostas relacionadas ═══
+                # ═══ OBTER MARCAS COMPOSTAS (necessário para verificação de capa) ═══
                 marcas_compostas = self._get_marcas_compostas_para_marca_base(marca)
                 
-                # ═══ Contagem de ocorrências (usa método com negative lookahead) ═══
-                contagem = self._count_marca_occurrences(
-                    marca, titulo_noticia, conteudo_noticia
-                )
+                # ═══ NOVA REGRA: Verificar se é notícia de CAPA (PRIORIDADE MÁXIMA) ═══
+                paginas_noticia = str(row.get('Paginas', '')).strip()
+                eh_capa = self._check_marca_eh_capa(marca, paginas_noticia, titulo_noticia, conteudo_noticia, marcas_compostas)
                 
-                # === PRÉ-PROCESSAMENTO BASEADO EM CONTAGEM DE OCORRÊNCIAS ===
-                
-                # CRÍTICO: Não pula quando contagem é 0 - deixa ir para DeepSeek
-                # O DeepSeek pode detectar a marca mesmo quando nossa contagem não encontra
-                
-                # Regra 1: 5+ ocorrências = Dedicada
-                if contagem >= 5:
+                if eh_capa:
                     nivel_detectado = 'Nível 1'  # Dedicada
                     classificacao_automatica = True
-                    self.logger.info(f"Marca '{marca}' com {contagem} ocorrências - Classificação automática: Dedicada")
+                    self.logger.info(f"Marca '{marca}' - CLASSIFICAÇÃO POR CAPA (_01_001) → Dedicada")
                     classificacoes_automaticas += 1
                 
-                # Regra 2: 3-4 ocorrências = Conteúdo
-                elif contagem >= 3:
-                    nivel_detectado = 'Nível 2'  # Conteúdo
-                    classificacao_automatica = True
-                    self.logger.info(f"Marca '{marca}' com {contagem} ocorrências - Classificação automática: Conteúdo")
-                    classificacoes_automaticas += 1
+                # ═══ CONTAGEM: Só se ainda não foi classificado por capa ═══
+                contagem = self._count_marca_occurrences_fixed(marca, titulo_noticia, conteudo_noticia, marcas_compostas)
                 
-                # Regra 3: 1-2 ocorrências = Citação (verifica porta-voz para upgrade)
-                elif contagem >= 1:
-                    nivel_detectado = 'Nível 3'  # Citação
-                    classificacao_automatica = True
-                    self.logger.info(f"Marca '{marca}' com {contagem} ocorrências - Classificação automática: Citação")
-                    classificacoes_automaticas += 1
+                # === PRÉ-PROCESSAMENTO BASEADO EM CONTAGEM DE OCORRÊNCIAS ===
+                # Só executa se não foi classificado por capa
+                
+                if not eh_capa:
+                    # CRÍTICO: Não pula quando contagem é 0 - deixa ir para DeepSeek
+                    # O DeepSeek pode detectar a marca mesmo quando nossa contagem não encontra
+                    
+                    # Regra 1: 5+ ocorrências = Dedicada
+                    if contagem >= 5:
+                        nivel_detectado = 'Nível 1'  # Dedicada
+                        classificacao_automatica = True
+                        self.logger.info(f"Marca '{marca}' com {contagem} ocorrências - Classificação automática: Dedicada")
+                        classificacoes_automaticas += 1
+                    
+                    # Regra 2: 3-4 ocorrências = Conteúdo
+                    elif contagem >= 3:
+                        nivel_detectado = 'Nível 2'  # Conteúdo
+                        classificacao_automatica = True
+                        self.logger.info(f"Marca '{marca}' com {contagem} ocorrências - Classificação automática: Conteúdo")
+                        classificacoes_automaticas += 1
+                    
+                    # Regra 3: 1-2 ocorrências = Citação (verifica porta-voz para upgrade)
+                    elif contagem >= 1:
+                        nivel_detectado = 'Nível 3'  # Citação
+                        classificacao_automatica = True
+                        self.logger.info(f"Marca '{marca}' com {contagem} ocorrências - Classificação automática: Citação")
+                        classificacoes_automaticas += 1
                 
                 # NOVA LÓGICA: Verificação de porta-vozes para TODAS as marcas com classificação automática
                 if classificacao_automatica and marca in marcas_com_porta_vozes and porta_vozes_noticia:
@@ -539,26 +583,29 @@ class ProtagonismoAnalyzer:
                     resultado_df.loc[mask, f'Porta-Voz {marca}'] = porta_vozes_str
                     
                     # Se era Citação (1-2 ocorrências), faz upgrade para Conteúdo
-                    if contagem >= 1 and contagem <= 2:
+                    # MAS SÓ se não for capa (capa mantém Dedicada)
+                    if not eh_capa and contagem >= 1 and contagem <= 2:
                         nivel_detectado = 'Nível 2'  # Upgrade para Conteúdo
                         upgrades_por_porta_voz += 1
                         self.logger.info(f"Marca '{marca}' com {contagem} ocorrências + porta-vozes: {', '.join(porta_vozes_noticia)} - Upgrade para Conteúdo")
                     else:
-                        # Para 3+ ocorrências, mantém o nível mas aplica porta-vozes
-                        self.logger.info(f"Marca '{marca}' com {contagem} ocorrências + porta-vozes: {', '.join(porta_vozes_noticia)} - Mantém {nivel_detectado}")
+                        # Para capa ou 3+ ocorrências, mantém o nível mas aplica porta-vozes
+                        origem_classificacao = "capa" if eh_capa else f"{contagem} ocorrências"
+                        self.logger.info(f"Marca '{marca}' ({origem_classificacao}) + porta-vozes: {', '.join(porta_vozes_noticia)} - Mantém {nivel_detectado}")
                 
-                # ═══ CORREÇÃO 2: Verificar se marca aparece ISOLADA no título (sobrescreve contagem) ═══
-                marca_isolada_no_titulo = self._verificar_marca_isolada_no_titulo(
-                    marca, titulo_noticia, marcas_compostas
-                )
-                
-                if marca_isolada_no_titulo:
-                    # Marca isolada no título sempre é Dedicada (sobrescreve classificação por contagem)
-                    nivel_detectado = 'Nível 1'  # Dedicada
-                    classificacao_automatica = True
-                    self.logger.info(f"Marca '{marca}' encontrada ISOLADA no título - Dedicada (sobrescreve contagem)")
-                    if contagem < 5:  # Só conta se não foi contado antes
-                        classificacoes_automaticas += 1
+                # ═══ CORREÇÃO 2: Verificar se marca aparece ISOLADA no título (só se não é capa) ═══
+                if not eh_capa:
+                    marca_isolada_no_titulo = self._verificar_marca_isolada_no_titulo(
+                        marca, titulo_noticia, marcas_compostas
+                    )
+                    
+                    if marca_isolada_no_titulo:
+                        # Marca isolada no título sempre é Dedicada (sobrescreve classificação por contagem)
+                        nivel_detectado = 'Nível 1'  # Dedicada
+                        classificacao_automatica = True
+                        self.logger.info(f"Marca '{marca}' encontrada ISOLADA no título - Dedicada (sobrescreve contagem)")
+                        if contagem < 5:  # Só conta se não foi contado antes
+                            classificacoes_automaticas += 1
                 
                 # Se não houve classificação automática, envia para DeepSeek
                 if not classificacao_automatica:
@@ -663,8 +710,23 @@ class ProtagonismoAnalyzer:
         - Exemplo: "Empresas inovadoras como iFood, Nubank, Bradesco, e outras..."
 
         REGRA IMPORTANTE: Se a marca "{marca}" for mencionada de QUALQUER FORMA no texto, ela deve ser classificada no MÍNIMO como "Nível 3" (Citação).
+        
+        ATENÇÃO - REGRAS ESPECIAIS PARA MARCAS COMPOSTAS:
+        
+        - Se analisando "Bradesco": APENAS conte "Bradesco" quando aparecer ISOLADO. NÃO conte "Bradesco BBI", "Bradesco Asset", ou outras variações compostas.
+        - Se analisando "BBI": conte "BBI" isolado E "Bradesco BBI".  
+        - Se analisando "Bradesco Asset": conte APENAS "Bradesco Asset" completo.
+        - Se analisando "Ágora": conte "Ágora" isolado (sem variações conhecidas).
+        - Se analisando "Itaú": APENAS conte "Itaú" quando aparecer ISOLADO. NÃO conte "Itaú Unibanco" ou outras variações compostas.
+        - Se analisando "Santander": APENAS conte "Santander" quando aparecer ISOLADO. NÃO conte "Santander Brasil" ou outras variações compostas.
+        
+        EXEMPLO IMPORTANTE:
+        - Texto: "Segundo o Bradesco Asset, o mercado cresceu"
+        - Análise para "Bradesco": → "Nenhum Nível Encontrado" (apenas "Bradesco Asset", não "Bradesco" isolado)
+        - Análise para "Bradesco Asset": → "Nível 3" ou superior (menção direta)
+        
         {specific_requirements}
-        APENAS responda "Nenhum Nível Encontrado" se a marca "{marca}" NÃO aparecer de forma alguma no texto.
+        APENAS responda "Nenhum Nível Encontrado" se a marca "{marca}" NÃO aparecer ISOLADAMENTE no texto (considerando as regras especiais acima).
 
         Analise o texto abaixo e responda SOMENTE com: "Nível 1", "Nível 2", "Nível 3" ou "Nenhum Nível Encontrado".
 
@@ -717,7 +779,12 @@ class ProtagonismoAnalyzer:
             noticia_id = row['Id']
             titulo = str(row.get('Titulo', '')).strip()
             conteudo = str(row.get('Conteudo', '')).strip()
-            noticias_dict[noticia_id] = {'titulo': titulo, 'conteudo': conteudo}
+            paginas = str(row.get('Paginas', '')).strip()
+            noticias_dict[noticia_id] = {
+                'titulo': titulo, 
+                'conteudo': conteudo,
+                'paginas': paginas
+            }
         
         # Cache de porta-vozes por notícia (detecta uma vez por notícia)
         porta_vozes_por_noticia = {}
@@ -729,6 +796,7 @@ class ProtagonismoAnalyzer:
             if noticia_id in noticias_dict:
                 titulo = noticias_dict[noticia_id]['titulo']
                 conteudo = noticias_dict[noticia_id]['conteudo']
+                paginas = noticias_dict[noticia_id]['paginas']
                 
                 # Detecta porta-vozes UMA VEZ por notícia
                 if noticia_id not in porta_vozes_por_noticia:
@@ -743,57 +811,73 @@ class ProtagonismoAnalyzer:
                     
                     # Se não há classificação ou é "Nenhum Nível Encontrado"
                     if pd.isna(nivel_atual) or nivel_atual == 'Nenhum Nível Encontrado':
-                        # ═══ CORREÇÃO: Usar contagem corrigida ═══
-                        marcas_compostas = self._get_marcas_compostas_para_marca_base(marca)
-                        contagem = self._count_marca_occurrences_fixed(marca, titulo, conteudo, marcas_compostas)
                         
-                        # Se encontrou ocorrências, reclassifica baseado na quantidade
-                        if contagem > 0:
-                            # Determina o nível baseado na quantidade de ocorrências
-                            if contagem >= 5:
-                                nivel_corrigido = 'Nível 1'  # Dedicada
-                                nome_nivel = 'Dedicada'
-                            elif contagem >= 3:  # 3-4 ocorrências
-                                nivel_corrigido = 'Nível 2'  # Conteúdo
-                                nome_nivel = 'Conteúdo'
-                            else:  # 1-2 ocorrências
-                                nivel_corrigido = 'Nível 3'  # Citação
-                                nome_nivel = 'Citação'
-                            
-                            # NOVA LÓGICA: Aplicar porta-vozes SEMPRE que houver (independente da contagem)
-                            if marca in ['Bradesco', 'Ágora', 'Bradesco Asset', 'BBI']:
-                                porta_vozes_noticia = porta_vozes_por_noticia.get(noticia_id, [])
-                                
-                                if porta_vozes_noticia:
-                                    # Preenche coluna de porta-voz
-                                    portavoz_col = f'Porta-Voz {marca}'
-                                    if portavoz_col in df_resultados.columns:
-                                        porta_vozes_str = ', '.join(porta_vozes_noticia)
-                                        df_resultados.loc[index, portavoz_col] = porta_vozes_str
-                                    
-                                    # Só faz upgrade para Conteúdo se era Citação (1-2 ocorrências)
-                                    if contagem >= 1 and contagem <= 2:
-                                        nivel_corrigido = 'Nível 2'  # Upgrade para Conteúdo
-                                        nome_nivel = f'Conteúdo (upgrade por porta-voz: {", ".join(porta_vozes_noticia)})'
-                                    else:
-                                        # Para 3+ ocorrências, mantém nível original mas adiciona porta-vozes
-                                        nome_nivel = f'{nome_nivel} (com porta-voz: {", ".join(porta_vozes_noticia)})'
-                            
-                            # ═══ CORREÇÃO: Verificar se marca está ISOLADA no título ═══
-                            marca_isolada = self._verificar_marca_isolada_no_titulo(marca, titulo, marcas_compostas)
-                            if marca_isolada:
-                                nivel_corrigido = 'Nível 1'
-                                nome_nivel = 'Dedicada (marca isolada no título)'
-                            
-                            self.logger.info(f"Corrigindo classificação - Notícia ID {noticia_id}, Marca {marca}: "
-                                           f"'{nivel_atual}' → '{nome_nivel}' ({contagem} ocorrências)")
-                            
-                            df_resultados.loc[index, nivel_col] = nivel_corrigido
-                            df_resultados.loc[index, ocorrencias_col] = contagem
+                        # ═══ OBTER MARCAS COMPOSTAS PARA VERIFICAÇÃO DE CAPA ═══
+                        marcas_compostas = self._get_marcas_compostas_para_marca_base(marca)
+                        
+                        # ═══ NOVA: Verificar se é notícia de CAPA (PRIORIDADE MÁXIMA) ═══
+                        eh_capa = self._check_marca_eh_capa(marca, paginas, titulo, conteudo, marcas_compostas)
+                        
+                        if eh_capa:
+                            nivel_corrigido = 'Nível 1'  # Dedicada
+                            nome_nivel = 'Dedicada (capa: _01_001)'
                             correcoes_realizadas += 1
+                            
+                            # Atualizar resultado
+                            df_resultados.loc[index, nivel_col] = nivel_corrigido
+                            df_resultados.loc[index, ocorrencias_col] = 0  # Capa não precisa contagem
+                            
+                            self.logger.info(f"Notícia ID {noticia_id} - Marca '{marca}' classificada como '{nome_nivel}' por estar na CAPA")
+                        
                         else:
-                            self.logger.debug(f"Mantendo classificação - Notícia ID {noticia_id}, Marca {marca}: "
-                                            f"marca não encontrada no texto")
+                            # ═══ CONTAGEM: Só se não for capa (marcas_compostas já definida acima) ═══
+                            contagem = self._count_marca_occurrences_fixed(marca, titulo, conteudo, marcas_compostas)
+                            
+                            # Se encontrou ocorrências, reclassifica baseado na quantidade
+                            if contagem > 0:
+                                # Determina o nível baseado na quantidade de ocorrências
+                                if contagem >= 5:
+                                    nivel_corrigido = 'Nível 1'  # Dedicada
+                                    nome_nivel = 'Dedicada'
+                                elif contagem >= 3:  # 3-4 ocorrências
+                                    nivel_corrigido = 'Nível 2'  # Conteúdo
+                                    nome_nivel = 'Conteúdo'
+                                else:  # 1-2 ocorrências
+                                    nivel_corrigido = 'Nível 3'  # Citação
+                                    nome_nivel = 'Citação'
+                                
+                                # ═══ CORREÇÃO: Verificar se marca está ISOLADA no título ═══
+                                marca_isolada = self._verificar_marca_isolada_no_titulo(marca, titulo, marcas_compostas)
+                                if marca_isolada:
+                                    nivel_corrigido = 'Nível 1'
+                                    nome_nivel = 'Dedicada (marca isolada no título)'
+                                
+                                self.logger.info(f"Corrigindo classificação - Notícia ID {noticia_id}, Marca {marca}: "
+                                               f"'{nivel_atual}' → '{nome_nivel}' ({contagem} ocorrências)")
+                                
+                                df_resultados.loc[index, nivel_col] = nivel_corrigido
+                                df_resultados.loc[index, ocorrencias_col] = contagem
+                                correcoes_realizadas += 1
+                            else:
+                                self.logger.debug(f"Mantendo classificação - Notícia ID {noticia_id}, Marca {marca}: "
+                                                f"marca não encontrada no texto")
+                        
+                        # ═══ APLICAR PORTA-VOZES (para ambos: capa E contagem) ═══
+                        if marca in ['Bradesco', 'Ágora', 'Bradesco Asset', 'BBI']:
+                            porta_vozes_noticia = porta_vozes_por_noticia.get(noticia_id, [])
+                            
+                            if porta_vozes_noticia:
+                                # Preenche coluna de porta-voz
+                                portavoz_col = f'Porta-Voz {marca}'
+                                if portavoz_col in df_resultados.columns:
+                                    porta_vozes_str = ', '.join(porta_vozes_noticia)
+                                    df_resultados.loc[index, portavoz_col] = porta_vozes_str
+                                    self.logger.info(f"Porta-vozes aplicados para {marca}: {porta_vozes_str}")
+                                
+                                # Upgrade para Conteúdo só se for Citação por contagem (não capa)
+                                if not eh_capa and 'contagem' in locals() and contagem >= 1 and contagem <= 2:
+                                    df_resultados.loc[index, nivel_col] = 'Nível 2'  # Upgrade para Conteúdo
+                                    self.logger.info(f"Upgrade para Conteúdo por porta-voz: {marca}")
             else:
                 self.logger.warning(f"Texto não encontrado para notícia ID {noticia_id}")
         
