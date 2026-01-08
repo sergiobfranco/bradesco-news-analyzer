@@ -1,6 +1,13 @@
+# Dependências existentes do projeto
 pandas==2.1.4
 requests==2.31.0
 openpyxl==3.1.2
 xlsxwriter==3.1.9
 python-dotenv==1.0.0
 pathlib2==2.3.7
+
+# Dependência adicionada para interface Streamlit
+streamlit>=1.31.0
+
+# Dependências auxiliares do Streamlit (compatíveis com as versões acima)
+numpy>=1.24.0

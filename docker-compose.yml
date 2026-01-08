@@ -2,8 +2,19 @@ services:
   news-analyzer:
     build: .
     container_name: bradesco-news-analyzer
+    ports:
+      - "8595:8595"
     environment:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TEMP_DIR=${TEMP_DIR:-/tmp}
+      - MAX_RETRIES=${MAX_RETRIES:-3}
+      - API_TIMEOUT=${API_TIMEOUT:-30}
+      - PYTHONUNBUFFERED=1
+      - STREAMLIT_SERVER_PORT=8595
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+      - STREAMLIT_SERVER_HEADLESS=true
+      - STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
     volumes:
       - ./dados:/app/dados
       - ./config:/app/config
@@ -12,6 +23,12 @@ services:
     restart: "no"
     networks:
       - news-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8595/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 networks:
   news-net:
