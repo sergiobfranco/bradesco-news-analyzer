@@ -36,17 +36,62 @@ st.set_page_config(
 )
 
 # Configuração de logging
+class SaoPauloFormatter(logging.Formatter):
+    """Formattador de log que usa o fuso horário de São Paulo"""
+    
+    def formatTime(self, record, datefmt=None):
+        sao_paulo_tz = pytz.timezone('America/Sao_Paulo')
+        ct = datetime.fromtimestamp(record.created, tz=sao_paulo_tz)
+        if datefmt:
+            s = ct.strftime(datefmt)
+        else:
+            s = ct.strftime(self.default_time_format)
+        return s
+
 def setup_logging():
     """Configura o sistema de logging"""
+    formatter = SaoPauloFormatter(
+        fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    file_handler = logging.FileHandler('logs/app.log', encoding='utf-8')
+    file_handler.setFormatter(formatter)
+    
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler('logs/app.log', encoding='utf-8'),
-            logging.StreamHandler()
-        ]
+        handlers=[file_handler, stream_handler]
     )
     return logging.getLogger(__name__)
+
+def rotate_logs():
+    """Rotaciona os arquivos de log para manter apenas os últimos 3 processamentos"""
+    log_dir = Path('logs')
+    log_dir.mkdir(exist_ok=True)
+    
+    base_log = log_dir / 'app.log'
+    
+    # Se o arquivo principal não existe, nada a fazer
+    if not base_log.exists():
+        return
+    
+    # Rotacionar: mover .2 para .3 (deletar), .1 para .2, principal para .1
+    log_3 = log_dir / 'app.log.3'
+    if log_3.exists():
+        log_3.unlink()  # Deletar o mais antigo
+    
+    log_2 = log_dir / 'app.log.2'
+    if log_2.exists():
+        log_2.rename(log_3)
+    
+    log_1 = log_dir / 'app.log.1'
+    if log_1.exists():
+        log_1.rename(log_2)
+    
+    # Mover o principal para .1
+    base_log.rename(log_1)
 
 logger = setup_logging()
 
@@ -263,15 +308,21 @@ def main():
         
         # Informações de log
         st.header("📝 Últimos Logs")
-        if os.path.exists('logs/app.log'):
-            try:
-                # Usar encoding com tratamento de erros para caracteres inválidos
-                with open('logs/app.log', 'r', encoding='utf-8', errors='replace') as f:
-                    logs = f.readlines()
-                    last_logs = ''.join(logs[-10:])
-                    st.text_area("Logs", last_logs, height=200, label_visibility="collapsed")
-            except Exception as e:
-                st.error(f"Erro ao ler logs: {str(e)}")
+        log_files = ['logs/app.log', 'logs/app.log.1', 'logs/app.log.2', 'logs/app.log.3']
+        all_logs = []
+        
+        for log_file in log_files:
+            if os.path.exists(log_file):
+                try:
+                    with open(log_file, 'r', encoding='utf-8', errors='replace') as f:
+                        all_logs.extend(f.readlines())
+                except Exception as e:
+                    logger.error(f"Erro ao ler {log_file}: {str(e)}")
+        
+        if all_logs:
+            # Pegar as últimas 10 linhas de todos os logs combinados
+            last_logs = ''.join(all_logs[-10:])
+            st.text_area("Logs", last_logs, height=200, label_visibility="collapsed")
         else:
             st.info("Nenhum log disponível ainda")
     
@@ -298,6 +349,8 @@ def main():
             
             with col_yes:
                 if st.button("✅ Sim, processar", type="primary", use_container_width=True):
+                    # Rotacionar logs antes de iniciar novo processamento
+                    rotate_logs()
                     st.session_state.processing = True
                     st.session_state.processing_confirmed = False
                     st.rerun()
