@@ -326,13 +326,17 @@ def main():
             if log_file.exists():
                 try:
                     with open(log_file, 'r', encoding='utf-8', errors='replace') as f:
-                        all_logs.extend(f.readlines())
+                        lines = f.readlines()
+                        if lines:
+                            # Pegar as últimas 3 linhas de cada arquivo de log
+                            last_lines = lines[-3:]
+                            all_logs.extend(last_lines)
                 except Exception as e:
                     logger.error(f"Erro ao ler {log_file}: {str(e)}")
         
         if all_logs:
-            # Pegar as últimas 10 linhas de todos os logs combinados
-            last_logs = ''.join(all_logs[-10:])
+            # Combinar todas as linhas (já ordenadas por recência de arquivo)
+            last_logs = ''.join(all_logs)
             st.text_area("Logs", last_logs, height=200, label_visibility="collapsed")
         else:
             st.info("Nenhum log disponível ainda")
