@@ -242,12 +242,11 @@ def run_processing():
                     logger.warning(f"Arquivo gerado mas não encontrado em: {arquivo_final}")
                     return arquivo_final
             else:
-                st.error("❌ Erro ao gerar arquivo final")
+                logger.error("Erro ao gerar arquivo final")
                 return None
         
     except Exception as e:
         logger.error(f"Erro durante a execução: {str(e)}", exc_info=True)
-        st.error(f"❌ Erro durante o processamento: {str(e)}")
         return None
 
 def load_logo():
