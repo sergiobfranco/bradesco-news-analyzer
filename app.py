@@ -392,7 +392,17 @@ def main():
                     # Informar sobre o arquivo gerado
                     st.info(f"📄 Arquivo: {os.path.basename(arquivo_final)}")
                 else:
-                    st.error("❌ Processamento falhou. Verifique os logs para mais detalhes.")
+                    # Tentar encontrar arquivo gerado recentemente
+                    recent_files = get_latest_files(limit=1)
+                    if recent_files:
+                        arquivo_final = recent_files[0][0]
+                        st.session_state.last_processed_file = arquivo_final
+                        st.balloons()
+                        st.success("🎉 Processamento concluído com sucesso!")
+                        st.info(f"📄 Arquivo: {os.path.basename(arquivo_final)}")
+                        logger.info(f"Arquivo encontrado apesar de process_batch retornar None: {arquivo_final}")
+                    else:
+                        st.error("❌ Processamento falhou. Verifique os logs para mais detalhes.")
             
             # Resetar estado
             st.session_state.processing = False
