@@ -54,7 +54,11 @@ def setup_logging():
         fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    file_handler = logging.FileHandler('logs/app.log', encoding='utf-8')
+    # Garantir que o diretório de logs existe
+    log_dir = Path('logs')
+    log_dir.mkdir(exist_ok=True)
+    
+    file_handler = logging.FileHandler(log_dir / 'app.log', encoding='utf-8')
     file_handler.setFormatter(formatter)
     
     stream_handler = logging.StreamHandler()
@@ -68,6 +72,7 @@ def setup_logging():
 
 def rotate_logs():
     """Rotaciona os arquivos de log para manter apenas os últimos 3 processamentos"""
+    logger.info("Iniciando rotação de logs")
     log_dir = Path('logs')
     log_dir.mkdir(exist_ok=True)
     
@@ -75,23 +80,28 @@ def rotate_logs():
     
     # Se o arquivo principal não existe, nada a fazer
     if not base_log.exists():
+        logger.info("Arquivo de log principal não existe, pulando rotação")
         return
     
     # Rotacionar: mover .2 para .3 (deletar), .1 para .2, principal para .1
     log_3 = log_dir / 'app.log.3'
     if log_3.exists():
         log_3.unlink()  # Deletar o mais antigo
+        logger.info("Deletado app.log.3")
     
     log_2 = log_dir / 'app.log.2'
     if log_2.exists():
         log_2.rename(log_3)
+        logger.info("Movido app.log.2 para app.log.3")
     
     log_1 = log_dir / 'app.log.1'
     if log_1.exists():
         log_1.rename(log_2)
+        logger.info("Movido app.log.1 para app.log.2")
     
     # Mover o principal para .1
     base_log.rename(log_1)
+    logger.info("Movido app.log para app.log.1")
 
 logger = setup_logging()
 
@@ -308,11 +318,12 @@ def main():
         
         # Informações de log
         st.header("📝 Últimos Logs")
-        log_files = ['logs/app.log', 'logs/app.log.1', 'logs/app.log.2', 'logs/app.log.3']
+        log_dir = Path('logs')
+        log_files = [log_dir / 'app.log', log_dir / 'app.log.1', log_dir / 'app.log.2', log_dir / 'app.log.3']
         all_logs = []
         
         for log_file in log_files:
-            if os.path.exists(log_file):
+            if log_file.exists():
                 try:
                     with open(log_file, 'r', encoding='utf-8', errors='replace') as f:
                         all_logs.extend(f.readlines())
