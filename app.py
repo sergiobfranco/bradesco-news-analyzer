@@ -393,9 +393,17 @@ def main():
                     st.info(f"📄 Arquivo: {os.path.basename(arquivo_final)}")
                 else:
                     # Tentar encontrar arquivo gerado recentemente
-                    recent_files = get_latest_files(limit=1)
-                    if recent_files:
-                        arquivo_final = recent_files[0][0]
+                    import glob
+                    possible_files = []
+                    for base_path in ['downloads', '/app/downloads', os.path.join(os.getcwd(), 'downloads')]:
+                        if os.path.exists(base_path):
+                            pattern = os.path.join(base_path, '*.xlsx')
+                            possible_files.extend(glob.glob(pattern))
+                    
+                    if possible_files:
+                        # Pegar o mais recente
+                        latest_file = max(possible_files, key=os.path.getmtime)
+                        arquivo_final = latest_file
                         st.session_state.last_processed_file = arquivo_final
                         st.balloons()
                         st.success("🎉 Processamento concluído com sucesso!")
