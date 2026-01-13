@@ -14,6 +14,7 @@ import pandas as pd
 import time
 from glob import glob
 from PIL import Image
+import pytz
 
 # Adicionar o diretório atual ao path para importações
 sys.path.append(str(Path(__file__).parent))
@@ -70,6 +71,9 @@ def get_latest_files(directory='downloads', pattern='Tabela_atualizacao_em_lote_
         Lista de tuplas (caminho_completo, nome_arquivo, data_modificação)
     """
     try:
+        # Fuso horário de São Paulo
+        sao_paulo_tz = pytz.timezone('America/Sao_Paulo')
+        
         # Tentar vários caminhos possíveis
         possible_paths = [
             directory,
@@ -101,7 +105,7 @@ def get_latest_files(directory='downloads', pattern='Tabela_atualizacao_em_lote_
         
         # Ordenar por data de modificação (mais recente primeiro)
         files_with_time = [
-            (f, os.path.basename(f), datetime.fromtimestamp(os.path.getmtime(f)))
+            (f, os.path.basename(f), datetime.fromtimestamp(os.path.getmtime(f), tz=sao_paulo_tz))
             for f in unique_files.values()
         ]
         files_with_time.sort(key=lambda x: x[2], reverse=True)

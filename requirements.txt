@@ -11,3 +11,6 @@ streamlit>=1.31.0
 
 # Dependências auxiliares do Streamlit (compatíveis com as versões acima)
 numpy>=1.24.0
+
+# Dependência para manipulação de fusos horários
+pytz==2023.3
